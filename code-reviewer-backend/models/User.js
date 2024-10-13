@@ -10,6 +10,9 @@ const userSchema = new mongoose.Schema({
   displayName: String,
   profileUrl: String,
   avatarUrl: String,
+  bio:String,
 });
 
 const User = mongoose.model('User', userSchema);
+
+module.exports = User;

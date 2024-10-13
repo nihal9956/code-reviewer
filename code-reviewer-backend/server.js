@@ -4,13 +4,17 @@ const dotenv = require('dotenv');
 
 dotenv.config();
 
-const connection = mongoose.createConnection(process.env.MONGO_URI);
-connection.on('connected', () => {
-    console.log('Connected To MongoDB Atlas!')
-})
-connection.on('error', (err) => {
+// Establish MongoDB connection using mongoose.connect
+mongoose.connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+}).then(() => {
+    console.log('Connected to MongoDB Atlas!');
+}).catch((err) => {
     console.error('Error connecting to MongoDB Atlas:', err);
+    process.exit(1); // Exit process if connection fails
 });
+
 
 app.listen(5000, () => {
     console.log('server running on port 5000.')
