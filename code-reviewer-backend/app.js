@@ -7,7 +7,6 @@ const User = require('./models/User');
 const axios = require('axios');
 const { exec } = require('child_process');
 const Repository = require('./models/Repo');
-
 dotenv.config();
 
 const app = express();
@@ -27,27 +26,28 @@ passport.use(new GitHubStrategy({                   // passing configurarions of
     clientID: process.env.GITHUB_CLIENT_ID,
     clientSecret: process.env.GITHUB_CLIENT_SECRET,
     callbackURL: process.env.GITHUB_CALLBACK_URL
-},async function (accessToken, refreshToken, profile, done) {
+}, async function (accessToken, refreshToken, profile, done) {
     // In a real-world application, you would save the user info to a database here
-    
-   try{
-    const existingUser = await User.findOne({ githubId: profile.id });
-    if(!existingUser){
-    const user =await User.create({
-      githubId:profile.id,
-      username: profile.username,
-      displayName: profile.displayName,
-      profileUrl: profile.profileUrl,
-      avatarUrl: profile.photos[0].value,
-      bio:profile._json.bio,
-    });   
-    console.log(user);}
-    
-   }
-   catch (err){
-    console.log(err)
-   }
-   profile.accessToken = accessToken;
+
+    try {
+        const existingUser = await User.findOne({ githubId: profile.id });
+        if (!existingUser) {
+            const user = await User.create({
+                githubId: profile.id,
+                username: profile.username,
+                displayName: profile.displayName,
+                profileUrl: profile.profileUrl,
+                avatarUrl: profile.photos[0].value,
+                bio: profile._json.bio,
+            });
+            console.log(user);
+        }
+
+    }
+    catch (err) {
+        console.log(err)
+    }
+    profile.accessToken = accessToken;
     return done(null, profile);
 
 }));
@@ -88,7 +88,7 @@ app.get('/profile', (req, res) => {
     res.send(`<h1>Hello ${req.user.username}</h1><a href="/logout">Logout</a>`);
 });
 
-app.get('/logout', (req, res,next) => {
+app.get('/logout', (req, res, next) => {
     req.logout((err) => {
         if (err) { return next(err); }
         res.redirect('/');
@@ -115,7 +115,7 @@ app.get('/repos', async (req, res) => {
 
         const repos = response.data;
         console.log(response.data);
-        
+
         res.json(repos);
     } catch (err) {
         console.error('Error fetching repositories:', err);
@@ -128,13 +128,14 @@ app.get('/repos', async (req, res) => {
 app.post('/clone', async (req, res) => {
     const { repoUrl } = req.body;
 
-    exec(`git clone ${repoUrl}`, (err, stdout, stderr) => {
+
+    exec(`git clone ${repoUrl}`, async (err, stdout, stderr) => {
         if (err) {
             console.error('Error cloning repo:', stderr);
             return res.status(500).json({ error: 'Error cloning repository' });
         }
         // Save repository info to MongoDB
-        const repoName = repoUrl.split('/').pop().replace('.git', '');
+        const repoName = repoUrl.split('/').pop().replace('.git', '');       
         const repository = new Repository({ name: repoName, url: repoUrl });
         repository.save().then(() => {
             res.status(200).json({ message: 'Repository cloned successfully', repository });
