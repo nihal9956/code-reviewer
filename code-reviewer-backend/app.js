@@ -3,13 +3,16 @@ const passport = require('passport');
 const GitHubStrategy = require('passport-github2').Strategy;
 const session = require('express-session');
 const dotenv = require('dotenv');
-const User = require('./models/User');
-const axios = require('axios');
-const { exec } = require('child_process');
-const Repository = require('./models/Repo');
+const User = require('./model/userModal')
+const path = require('path')
+const simpleGit = require('simple-git');
+const fs = require('fs');
+const { ESLint } = require('eslint');
+
 dotenv.config();
 
 const app = express();
+const git = simpleGit();
 app.use(express.json())
 // Middleware for sessions
 app.use(session({
@@ -19,44 +22,33 @@ app.use(session({
 }));
 
 
+
 app.use(passport.initialize()); //initialize passport
 app.use(passport.session()); //initialize passport session
-
-passport.use(new GitHubStrategy({                   // passing configurarions of github into passport for fetching profile
+passport.use(new GitHubStrategy({
     clientID: process.env.GITHUB_CLIENT_ID,
     clientSecret: process.env.GITHUB_CLIENT_SECRET,
     callbackURL: process.env.GITHUB_CALLBACK_URL
-}, async function (accessToken, refreshToken, profile, done) {
-    // In a real-world application, you would save the user info to a database here
-
+}, async (accessToken, refreshToken, profile, done) => {
     try {
-        const existingUser = await User.findOne({ githubId: profile.id });
-        if (!existingUser) {
-            const user = await User.create({
+        let user = await User.findOne({ githubId: profile.id });
+        if (!user) {
+            user = await User.create({
                 githubId: profile.id,
-                username: profile.username,
-                displayName: profile.displayName,
-                profileUrl: profile.profileUrl,
-                avatarUrl: profile.photos[0].value,
-                bio: profile._json.bio,
+                displayName: profile.displayName
             });
-            console.log(user);
         }
-
+        return done(null, user);
+    } catch (err) {
+        return done(err, null);
     }
-    catch (err) {
-        console.log(err)
-    }
-    profile.accessToken = accessToken;
-    return done(null, profile);
-
 }));
 
-passport.serializeUser((user, done) => {               // saving a chunck of data  in session
+passport.serializeUser((user, done) => {           // saving a chunck of data  in session
     done(null, user);
 });
 
-passport.deserializeUser((obj, done) => {      // fetching saved chunck of data while making api calls
+passport.deserializeUser((obj, done) => {         // fetching saved chunck of data while making api calls
     done(null, obj);
 });
 
@@ -78,8 +70,71 @@ app.get('/auth/github/callback',
     }),
     (req, res) => {
         // Successful authentication
-        res.redirect('/repos');
+        res.redirect('/profile');
     });
+
+const getAllJsFiles = (dir) => {
+    let results = [];
+
+    // Read the contents of the directory
+    const files = fs.readdirSync(dir);
+
+    files.forEach(file => {
+        const filePath = path.join(dir, file);
+        // Check if the current file is a directory
+        if (fs.statSync(filePath).isDirectory()) {
+            // Recursively call this function for the directory
+            results = results.concat(getAllJsFiles(filePath));
+        } else if (file.endsWith('.js')) {
+            // If it's a .js file, add it to the results
+            results.push(filePath);
+        }
+    });
+
+    return results;
+};
+
+app.post('/review', async (req, res) => {
+    const { repoUrl } = req.body;
+
+    if (!repoUrl) {
+        return res.status(400).json({ error: 'Repository URL is required' });
+    }
+
+    const repoName = path.basename(repoUrl).replace('.git', '');  //extracting the repo name.
+    const clonePath = path.join(__dirname, 'repos', repoName);  //getting the path of clonned repo from local
+    const CODE_FOLDER = clonePath;
+
+    try {
+        // Clone the repository
+        await git.clone(repoUrl, clonePath);
+
+        try {
+            const eslint = new ESLint({ fix: false, overrideConfigFile: path.join(__dirname, 'eslint.config.js'), }); // Set to true if you want to auto-fix problems
+            const jsFiles = getAllJsFiles(CODE_FOLDER); // Get all .js files recursively
+            const reviewResults = {};
+            // Analyze each file with ESLint
+            for (const file of jsFiles) {
+                const results = await eslint.lintFiles([file]);
+
+                reviewResults[file] = results.map(result => ({
+                    filePath: result.filePath,
+                    messages: result.messages,
+                    errorCount: result.errorCount,
+                    warningCount: result.warningCount,
+                }));
+            }
+            // Send the review results as JSON response
+            res.json(reviewResults);
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ error: 'An error occurred while reviewing the code.' });
+        }
+    } catch (error) {
+        console.error(`Failed to clone repository: ${error}`);
+        res.status(500).json({ error: 'Failed to clone repository' });
+    }
+});
 
 app.get('/profile', (req, res) => {
     if (!req.isAuthenticated()) {
@@ -88,63 +143,11 @@ app.get('/profile', (req, res) => {
     res.send(`<h1>Hello ${req.user.username}</h1><a href="/logout">Logout</a>`);
 });
 
-app.get('/logout', (req, res, next) => {
+app.get('/logout', (req, res) => {
     req.logout((err) => {
         if (err) { return next(err); }
         res.redirect('/');
     });
 });
-
-
-// Route to get GitHub repositories
-app.get('/repos', async (req, res) => {
-    if (!req.isAuthenticated()) {
-        return res.status(401).json({ message: 'Unauthorized' });
-    }
-
-    // Retrieve the access token from the session
-    const accessToken = req.user.accessToken;
-
-    try {
-        // Make a request to the GitHub API to get the user's repositories
-        const response = await axios.get('https://api.github.com/user/repos', {
-            headers: {
-                Authorization: `token ${accessToken}`
-            }
-        });
-
-        const repos = response.data;
-        console.log(response.data);
-
-        res.json(repos);
-    } catch (err) {
-        console.error('Error fetching repositories:', err);
-        res.status(500).json({ message: 'Error fetching repositories' });
-    }
-});
-
-
-// Clone Repository
-app.post('/clone', async (req, res) => {
-    const { repoUrl } = req.body;
-
-
-    exec(`git clone ${repoUrl}`, async (err, stdout, stderr) => {
-        if (err) {
-            console.error('Error cloning repo:', stderr);
-            return res.status(500).json({ error: 'Error cloning repository' });
-        }
-        // Save repository info to MongoDB
-        const repoName = repoUrl.split('/').pop().replace('.git', '');       
-        const repository = new Repository({ name: repoName, url: repoUrl });
-        repository.save().then(() => {
-            res.status(200).json({ message: 'Repository cloned successfully', repository });
-        }).catch((err) => {
-            console.error('Error saving repository:', err);
-            res.status(500).json({ error: 'Error saving repository' });
-        });
-    });
-});
-
 
 module.exports = app;
