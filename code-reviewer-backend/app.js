@@ -3,11 +3,17 @@ const passport = require('passport');
 const GitHubStrategy = require('passport-github2').Strategy;
 const session = require('express-session');
 const dotenv = require('dotenv');
+const User = require('./model/userModal')
+const path = require('path')
+const simpleGit = require('simple-git');
+const fs = require('fs');
+const { ESLint } = require('eslint');
 
 dotenv.config();
 
 const app = express();
-
+const git = simpleGit();
+app.use(express.json())
 // Middleware for sessions
 app.use(session({
     secret: process.env.SESSION_SECRET,
@@ -16,23 +22,33 @@ app.use(session({
 }));
 
 
+
 app.use(passport.initialize()); //initialize passport
 app.use(passport.session()); //initialize passport session
-
-passport.use(new GitHubStrategy({                   // passing configurarions of github into passport for fetching profile
+passport.use(new GitHubStrategy({
     clientID: process.env.GITHUB_CLIENT_ID,
     clientSecret: process.env.GITHUB_CLIENT_SECRET,
     callbackURL: process.env.GITHUB_CALLBACK_URL
-}, function (accessToken, refreshToken, profile, done) {
-    // In a real-world application, you would save the user info to a database here
-    return done(null, profile);
+}, async (accessToken, refreshToken, profile, done) => {
+    try {
+        let user = await User.findOne({ githubId: profile.id });
+        if (!user) {
+            user = await User.create({
+                githubId: profile.id,
+                displayName: profile.displayName
+            });
+        }
+        return done(null, user);
+    } catch (err) {
+        return done(err, null);
+    }
 }));
 
-passport.serializeUser((user, done) => {               // saving a chunck of data  in session
+passport.serializeUser((user, done) => {           // saving a chunck of data  in session
     done(null, user);
 });
 
-passport.deserializeUser((obj, done) => {      // fetching saved chunck of data while making api calls
+passport.deserializeUser((obj, done) => {         // fetching saved chunck of data while making api calls
     done(null, obj);
 });
 
@@ -56,6 +72,69 @@ app.get('/auth/github/callback',
         // Successful authentication
         res.redirect('/profile');
     });
+
+const getAllJsFiles = (dir) => {
+    let results = [];
+
+    // Read the contents of the directory
+    const files = fs.readdirSync(dir);
+
+    files.forEach(file => {
+        const filePath = path.join(dir, file);
+        // Check if the current file is a directory
+        if (fs.statSync(filePath).isDirectory()) {
+            // Recursively call this function for the directory
+            results = results.concat(getAllJsFiles(filePath));
+        } else if (file.endsWith('.js')) {
+            // If it's a .js file, add it to the results
+            results.push(filePath);
+        }
+    });
+
+    return results;
+};
+
+app.post('/review', async (req, res) => {
+    const { repoUrl } = req.body;
+
+    if (!repoUrl) {
+        return res.status(400).json({ error: 'Repository URL is required' });
+    }
+
+    const repoName = path.basename(repoUrl).replace('.git', '');  //extracting the repo name.
+    const clonePath = path.join(__dirname, 'repos', repoName);  //getting the path of clonned repo from local
+    const CODE_FOLDER = clonePath;
+
+    try {
+        // Clone the repository
+        await git.clone(repoUrl, clonePath);
+
+        try {
+            const eslint = new ESLint({ fix: false, overrideConfigFile: path.join(__dirname, 'eslint.config.js'), }); // Set to true if you want to auto-fix problems
+            const jsFiles = getAllJsFiles(CODE_FOLDER); // Get all .js files recursively
+            const reviewResults = {};
+            // Analyze each file with ESLint
+            for (const file of jsFiles) {
+                const results = await eslint.lintFiles([file]);
+
+                reviewResults[file] = results.map(result => ({
+                    filePath: result.filePath,
+                    messages: result.messages,
+                    errorCount: result.errorCount,
+                    warningCount: result.warningCount,
+                }));
+            }
+            // Send the review results as JSON response
+            res.json(reviewResults);
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ error: 'An error occurred while reviewing the code.' });
+        }
+    } catch (error) {
+        console.error(`Failed to clone repository: ${error}`);
+        res.status(500).json({ error: 'Failed to clone repository' });
+    }
+});
 
 app.get('/profile', (req, res) => {
     if (!req.isAuthenticated()) {
