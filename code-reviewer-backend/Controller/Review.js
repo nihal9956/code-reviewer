@@ -47,6 +47,7 @@ const review = async (req, res) => {
         try {
             const eslint = new ESLint({
                 fix: false,
+                overrideConfigFile: true,
                 overrideConfigFile: path.join(__dirname, '..', 'eslint.config.js'),
             });
 
@@ -55,7 +56,7 @@ const review = async (req, res) => {
             if (jsFiles.length === 0) {
                 throw new Error('No JS files found in the repository.');
             }
-           
+
             const reviewResults = {};
 
             const lintResults = await eslint.lintFiles(jsFiles); // Lint all files at once
