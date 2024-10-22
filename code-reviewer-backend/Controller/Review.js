@@ -29,6 +29,7 @@ const review = async (req, res) => {
             throw new Error('No files found in cloned repository.');
         }
         console.log('Files found in repository:', filesInRepo);
+        console.log('Files found in repository:', filesInRepo);
 
         // Run ESLint after cloning
         try {
