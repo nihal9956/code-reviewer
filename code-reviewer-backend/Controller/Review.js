@@ -6,30 +6,42 @@ const fs = require('fs');
 
 const git = simpleGit();
 
-const review = async (req, res) => {
+// Function to clone the repository using Git via child_process
+const cloneRepo = async (req, res, next) => {
     const { repoUrl } = req.body;
-
     if (!repoUrl) {
         return res.status(400).json({ error: 'Repository URL is required' });
     }
 
-    const repoName = path.basename(repoUrl).replace('.git', ''); // Extracting the repo name
-    const clonePath = path.resolve(__dirname, '..', 'repos', repoName); // Getting the path of the cloned repo from local
-    const CODE_FOLDER = clonePath;
+    const repoName = path.basename(repoUrl).replace('.git', '');
+    const clonePath = path.resolve(__dirname, '..', 'repos', repoName);
 
     try {
-        // Clone the repository
-        console.log(`Cloning repository: ${repoUrl} into path: ${clonePath}`);
         await git.clone(repoUrl, clonePath);
-        console.log('Repository cloned successfully.');
+        req.repoName = repoName;
+        next();
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to clone repository.' });
+    }
+};
 
+const review = async (req, res) => {
+    const { repoName } = req;
+
+    if (!repoName) {
+        return res.status(400).json({ error: 'Repository Name is required' });
+    }
+
+
+    const clonePath = path.resolve(__dirname, '..', 'repos', repoName); // Getting the path of the cloned repo from local
+
+
+    try {
         // Ensure that the repo has been cloned and files exist
-        const filesInRepo = fs.readdirSync(CODE_FOLDER);
+        const filesInRepo = fs.readdirSync(clonePath);
         if (filesInRepo.length === 0) {
             throw new Error('No files found in cloned repository.');
         }
-        console.log('Files found in repository:', filesInRepo);
-        console.log('Files found in repository:', filesInRepo);
 
         // Run ESLint after cloning
         try {
@@ -39,29 +51,22 @@ const review = async (req, res) => {
             });
 
             // Fetch JS files to lint
-            const jsFiles = getAllJsFiles(CODE_FOLDER);
+            const jsFiles = getAllJsFiles(clonePath);
             if (jsFiles.length === 0) {
                 throw new Error('No JS files found in the repository.');
             }
-            console.log('JavaScript files found:', jsFiles);
-
+           
             const reviewResults = {};
 
-            // Analyze each file with ESLint
-            for (const file of jsFiles) {
-                const results = await eslint.lintFiles([file]);
-                reviewResults[file] = results.map(result => ({
-                    filePath: result.filePath,
+            const lintResults = await eslint.lintFiles(jsFiles); // Lint all files at once
+            lintResults.forEach(result => {
+                reviewResults[result.filePath] = {
                     messages: result.messages,
                     errorCount: result.errorCount,
                     warningCount: result.warningCount,
-                }));
-            }
-
-            // Send the review results as JSON response
-            console.log('Review results:', reviewResults);
-            res.json(reviewResults);
-
+                };
+            });
+            res.status(200).json(reviewResults);
         } catch (eslintError) {
             console.error('ESLint error:', eslintError);
             res.status(500).json({ error: 'An error occurred while reviewing the code.' });
@@ -72,6 +77,48 @@ const review = async (req, res) => {
     }
 };
 
-module.exports = {
-    review,
-};
+
+// // Function to review the repository's JavaScript files using ESLint
+// const reviewRepo = async (req, res) => {
+//     const { repoUrl } = req.body;
+
+//     const repoName = path.basename(repoUrl).replace('.git', '');
+//     const clonePath = path.resolve(__dirname, '..', 'repos', repoName);
+
+//     try {
+//         const eslint = new ESLint({ fix: false });
+
+//         // Get all JavaScript files for linting
+//         const jsFiles = getAllJsFiles(clonePath);
+//         if (jsFiles.length === 0) {
+//             return res.status(404).json({ error: 'No JavaScript files found in the repository.' });
+//         }
+
+//         const reviewResults = [];
+
+//         // Lint all files and accumulate results
+//         for (const file of jsFiles) {
+//             const results = await eslint.lintFiles([file]);
+//             results.forEach(result => {
+//                 reviewResults.push({
+//                     filePath: result.filePath,
+//                     messages: result.messages,
+//                     errorCount: result.errorCount,
+//                     warningCount: result.warningCount,
+//                 });
+//             });
+//         }
+
+//         // Send all results as a single array
+//         console.log('Review results:', reviewResults);
+//         res.json(reviewResults);
+//     } catch (error) {
+//         console.error('ESLint error:', error);
+//         res.status(500).json({ error: 'An error occurred while reviewing the code.' });
+//     }
+// };
+
+module.exports = { cloneRepo, review };
+
+
+

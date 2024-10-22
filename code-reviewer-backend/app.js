@@ -5,7 +5,7 @@ const session = require('express-session');
 const dotenv = require('dotenv');
 const User = require('./models/User')
 const { gitHubAuth, githubAuthCallBack, githubLogOut } = require('./Controller/Auth');
-const { review } = require('./Controller/Review');
+const { review, cloneRepo } = require('./Controller/Review');
 const { getProfile } = require('./Controller/Profile');
 const { passportMiddleware } = require('./Middlewares/AuthMiddleware');
 
@@ -23,7 +23,7 @@ app.use(session({
 
 
 
-app.use(passport.initialize()); 
+app.use(passport.initialize());
 app.use(passport.session());
 passport.use(new GitHubStrategy({
     clientID: process.env.GITHUB_CLIENT_ID,
@@ -58,7 +58,7 @@ app.get('/', (req, res) => {
 });
 
 // GitHub OAuth routes
-app.get('/auth/github', gitHubAuth );
+app.get('/auth/github', gitHubAuth);
 
 app.get('/auth/github/callback',
     passportMiddleware,
@@ -66,9 +66,9 @@ app.get('/auth/github/callback',
 
 
 
-app.post('/review',review);
+app.post('/review', cloneRepo, review);
 
-app.get('/profile',getProfile);
+app.get('/profile', getProfile);
 
 app.get('/logout', githubLogOut);
 
